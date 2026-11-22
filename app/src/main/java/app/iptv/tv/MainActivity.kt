@@ -60,7 +60,6 @@ import java.util.Locale
 /** Коды запросов выбора файла: 7 — servers.txt / плейлист, 8 — сохранить настройки, 9 — восстановить настройки. */
 private const val RC_EXPORT = 8
 private const val RC_IMPORT = 9
-private const val RC_PERM = 10
 
 /**
  * Экран на переднем плане: после recreate() (смена темы или языка) старый экран не показывает свои окна и сообщения.
@@ -162,7 +161,6 @@ class MainActivity : Activity() {
         set(v) { field = v; Session.epgStatus = v; refreshTitle() }
     @Volatile private var loadGen = 0      // номер текущей загрузки плейлиста: устаревшие потоки ничего не публикуют
     private var started = false            // между onStart и onStop
-    private var askedStorage = false      // разрешение на запись в «Загрузки» (Android 6–9) уже запрашивали
     private var restoring = false          // настройки восстановлены из файла: onStop не должен затирать их своими данными
     @Volatile private var plEpgUrl = ""   // адрес программы из заголовка плейлиста (url-tvg)
 
@@ -2390,23 +2388,13 @@ class MainActivity : Activity() {
 
     private fun backupName() = "noxis-settings-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date()) + ".json"
 
-    private fun hasStoragePerm(): Boolean =
-        android.os.Build.VERSION.SDK_INT >= 29 || android.os.Build.VERSION.SDK_INT < 23 ||
-            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-    /** Сохранить настройки сразу, без окна выбора файлов: в «Загрузки» и в папку приложения. На Android 6–9 один раз спросит разрешение. */
+    /**
+     * Сохранить настройки сразу, без окна выбора файлов: в папку приложения и, на Android 10+,
+     * в «Загрузки». Разрешений не требует: на старых Android общая папка недоступна, копия
+     * остаётся в папке приложения (см. [saveToDownloads]).
+     */
     private fun exportSettings() {
-        if (!hasStoragePerm() && !askedStorage) {
-            askedStorage = true
-            requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE), RC_PERM)
-            return
-        }
         Thread { writeBackup(null, backupName()) }.start()
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == RC_PERM) exportSettings()   // разрешили или нет — сохраняем: без разрешения копия попадёт в папку приложения
     }
 
     /** Показывает результат окном: путь к файлу должен быть виден, пока его не прочитают. Вызывать из потока интерфейса. */
@@ -2428,23 +2416,16 @@ class MainActivity : Activity() {
             if (!canHandle(i)) throw IOException(L.t("нет окна выбора файлов"))
             startActivityForResult(i, RC_EXPORT)
         } catch (e: Exception) {
-            toast(L.t("Нет окна выбора файлов — сохраняю в «Загрузки» и в папку приложения"))
+            toast(L.t("Нет окна выбора файлов — сохраняю копию в папку приложения"))
             exportSettings()
         }
     }
 
     /** Кладёт копию в общую папку «Загрузки» (Android 10+, разрешения не нужны). false — не вышло или система старше. */
     private fun saveToDownloads(bytes: ByteArray, name: String): Boolean {
-        if (android.os.Build.VERSION.SDK_INT < 29) {
-            if (!hasStoragePerm()) return false
-            return try {
-                @Suppress("DEPRECATION")
-                val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-                dir.mkdirs()
-                File(dir, name).writeBytes(bytes)
-                true
-            } catch (e: Exception) { false }
-        }
+        // До Android 10 общая папка требует разрешения на запись; версия для RuStore его не запрашивает,
+        // поэтому копия остаётся в папке приложения или сохраняется через «Сохранить как…».
+        if (android.os.Build.VERSION.SDK_INT < 29) return false
         return try {
             val cv = android.content.ContentValues()
             cv.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -2466,16 +2447,6 @@ class MainActivity : Activity() {
                 android.provider.MediaStore.MediaColumns.DATE_ADDED + " DESC")?.use { c ->
                 if (c.moveToFirst()) android.content.ContentUris.withAppendedId(col, c.getLong(0)) else null
             }
-        } catch (e: Exception) { null }
-    }
-
-    /** Копия в общей папке «Загрузки» на Android 6–9 (нужно разрешение на запись; на 10+ используется [findDownloadsBackup]). */
-    private fun findLegacyBackup(): File? {
-        if (android.os.Build.VERSION.SDK_INT >= 29 || !hasStoragePerm()) return null
-        return try {
-            @Suppress("DEPRECATION")
-            val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-            dir.listFiles { x -> x.name.startsWith("noxis-settings") && x.name.endsWith(".json") }?.maxByOrNull { it.lastModified() }
         } catch (e: Exception) { null }
     }
 
@@ -2524,11 +2495,9 @@ class MainActivity : Activity() {
                 val dir = getExternalFilesDir(null)
                 val f = dir?.let { File(it, SettingsBackup.FILE_NAME) }
                 val d = findDownloadsBackup()
-                val lg = findLegacyBackup()
                 when {
                     f != null && f.exists() -> readBackup(null, f)
                     d != null -> readBackup(d, null)
-                    lg != null -> readBackup(null, lg)
                     else -> runOnUiThread {
                         toast(L.t("Нет выбора файлов. Положите ") + SettingsBackup.FILE_NAME + L.t(" в ") + dir?.absolutePath + L.t(" или восстановите по ссылке"))
                     }

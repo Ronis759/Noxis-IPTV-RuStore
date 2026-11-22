@@ -7,7 +7,11 @@ $ErrorActionPreference = "Stop"
 $root = "E:\OpenCode\Noxis-IPTV RuStore"
 $src = Join-Path $root "app\build\outputs\apk\release\app-release.apk"
 $outDir = Join-Path $root "releases"
-$out = Join-Path $outDir "noxis-iptv-rustore-3.0.0.apk"
+# имя файла — из версии в build.gradle.kts, чтобы не править скрипт при каждом релизе
+$gradle = Get-Content (Join-Path $root "app\build.gradle.kts") -Raw
+$ver = [regex]::Match($gradle, 'versionName = "([^"]+)"').Groups[1].Value
+if (-not $ver) { throw "Не найдена versionName в app\build.gradle.kts" }
+$out = Join-Path $outDir "noxis-iptv-rustore-$ver.apk"
 
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 

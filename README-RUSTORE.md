@@ -11,9 +11,10 @@
 | Название на ТВ | Noxis IPTV | Noxis IPTV (то же; отличается только иконка) |
 | Иконка | «N» + цветная полоска | то же + зелёная метка RuStore в углу |
 | Разрешение `REQUEST_INSTALL_PACKAGES` | есть | **нет** |
+| Разрешение `WRITE_EXTERNAL_STORAGE` | есть (Android 6–9) | **нет** |
 | Автообновление APK | есть | **нет** |
 | Кнопка в настройках | «Проверить обновления» | «Обновите через RuStore» |
-| Версия | 2.9.x (код = номер сборки GitHub) | 3.0.0 (код 28) |
+| Версия | 2.9.x (код = номер сборки GitHub) | 3.0.1 (код 29) |
 
 Почему убрано автообновление: модерация RuStore (п. 2.14) не пропускает разрешение
 `REQUEST_INSTALL_PACKAGES` — оно позволяет устанавливать APK в обход магазина.
@@ -25,6 +26,14 @@
 - `UpdateFlow.kt` заменён на пустую версию: проверок нет, вместо установки — подсказка
   «Обновите приложение через RuStore»;
 - `BuildConfig.UPDATES_ENABLED = false`.
+
+Почему убрано разрешение `WRITE_EXTERNAL_STORAGE`: RuStore считает его чувствительным и требует
+объяснение. Оно было нужно только для записи копии настроек в общую папку «Загрузки» на Android 6–9.
+Теперь разрешения нет:
+
+- на Android 10+ копия пишется в «Загрузки» через `MediaStore` (разрешение не требуется, как и раньше);
+- на Android 6–9 копия сохраняется в папку приложения (`Android/data/app.iptv.tv.rustore/files/`)
+  или через «Сохранить как…» (системный выбор файла, разрешения не нужны).
 
 ## Сборка
 
@@ -96,8 +105,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign-release.ps1
 ## Публикация в RuStore
 
 1. `versionCode` увеличивать перед каждой загрузкой (текущий — 28; сборку 27 отклонили).
-2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.0.0.apk`
-   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.0.0.apk`.
+2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.0.1.apk`
+   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.0.1.apk`.
 3. В описании обновления указать: «Устранена причина отклонения: удалено разрешение
    REQUEST_INSTALL_PACKAGES, обновления устанавливаются через RuStore».
 
@@ -105,7 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign-release.ps1
 
 ```powershell
 $aapt = "$env:LOCALAPPDATA\Android\Sdk\build-tools\35.0.0\aapt2.exe"
-& $aapt dump xmltree --file AndroidManifest.xml releases\noxis-iptv-rustore-3.0.0.apk | Select-String REQUEST_INSTALL
+& $aapt dump xmltree --file AndroidManifest.xml releases\noxis-iptv-rustore-3.0.1.apk | Select-String "REQUEST_INSTALL|WRITE_EXTERNAL"
 ```
 
 Вывод должен быть пустым.

@@ -91,13 +91,15 @@ jobs:
           echo "--- пакет и версия ---"
           "$AAPT" dump badging "$APK" | grep -E "^package:|^application-label:" | head -3
 
-          # Главное условие модерации: разрешения на установку APK быть не должно
+          # Главное условие модерации: разрешений на установку APK и на запись в память быть не должно
           "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" > "$RUNNER_TEMP/manifest.txt"
-          if grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/manifest.txt"; then
-            echo "::error::В APK есть REQUEST_INSTALL_PACKAGES — RuStore отклонит сборку"
-            exit 1
-          fi
-          echo "REQUEST_INSTALL_PACKAGES отсутствует — ок"
+          for p in REQUEST_INSTALL_PACKAGES WRITE_EXTERNAL_STORAGE; do
+            if grep -q "$p" "$RUNNER_TEMP/manifest.txt"; then
+              echo "::error::В APK есть $p — RuStore запросит пояснение или отклонит сборку"
+              exit 1
+            fi
+          done
+          echo "REQUEST_INSTALL_PACKAGES и WRITE_EXTERNAL_STORAGE отсутствуют — ок"
 
           # Каким ключом подписан APK: RuStore принимает только постоянный ключ, не отладочный
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner | sort -V | tail -1)

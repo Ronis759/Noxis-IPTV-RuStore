@@ -166,7 +166,7 @@ object En {
         "Список серверов пуст. Выберите «Выбрать сервер» → «＋ Добавить плейлист» и выберите файл" to "The server list is empty. Use “Choose server” → “＋ Add playlist” and pick a file",
         "нет окна выбора файлов" to "no file picker",
         "Нет выбора файлов. Положите servers.txt в " to "No file picker. Put servers.txt in ",
-        "Нет окна выбора файлов — сохраняю в «Загрузки» и в папку приложения" to "No file picker — saving to Downloads and the app folder",
+        "Нет окна выбора файлов — сохраняю копию в папку приложения" to "No file picker — saving the copy to the app folder",
         "нет доступа к файлу" to "no access to the file",
         "Настройки сохранены в файл" to "Settings saved to file",
         "нет папки приложения" to "no app folder",
