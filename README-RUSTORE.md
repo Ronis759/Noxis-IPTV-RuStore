@@ -8,7 +8,7 @@
 | | Обычная (GitHub) | RuStore |
 |---|---|---|
 | `applicationId` | `app.iptv.tv` | `app.iptv.tv.rustore` |
-| Название на ТВ | Noxis IPTV | Noxis IPTV RuStore |
+| Название на ТВ | Noxis IPTV | Noxis IPTV (то же; отличается только иконка) |
 | Иконка | «N» + цветная полоска | то же + зелёная метка RuStore в углу |
 | Разрешение `REQUEST_INSTALL_PACKAGES` | есть | **нет** |
 | Автообновление APK | есть | **нет** |

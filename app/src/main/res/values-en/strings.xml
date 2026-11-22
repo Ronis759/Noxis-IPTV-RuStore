@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Noxis IPTV RuStore</string>
+    <string name="app_name">Noxis IPTV</string>
     <string name="default_playlist"></string>
     <string name="default_epg"></string>
     <string name="github_repo"></string>

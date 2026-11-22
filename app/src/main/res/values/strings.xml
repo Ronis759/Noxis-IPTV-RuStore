@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Noxis IPTV RuStore</string>
+    <string name="app_name">Noxis IPTV</string>
     <!-- Оставьте пустыми: всё, что записано здесь, попадает в APK и в публичный репозиторий. Свои серверы загружайте из servers.txt -->
     <string name="default_playlist"></string>
     <string name="default_epg"></string>
