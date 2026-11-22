@@ -45,6 +45,9 @@ $args = @(
 & $apksigner @args
 if ($LASTEXITCODE -ne 0) { throw "apksigner вернул код $LASTEXITCODE" }
 Move-Item ($out + ".signed") $out -Force
+# файл .idsig нужен только для установки через adb; в RuStore он не загружается
+$idsig = $out + ".idsig"
+if (Test-Path $idsig) { Remove-Item -Force $idsig }
 
 & $apksigner verify --print-certs $out
 $hash = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
