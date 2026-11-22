@@ -40,13 +40,25 @@ jobs:
       - name: Ключ подписи из Secrets
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-            echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-          else
+          if [ -z "$KEYSTORE_BASE64" ]; then
             echo "::warning::Secret KEYSTORE_BASE64 не задан: APK будет подписан отладочным ключом, RuStore такой файл не примет"
+            exit 0
           fi
+          # выбрасываем всё, что не входит в base64: переносы строк, пробелы, кавычки, случайные символы
+          printf '%s' "$KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=' | base64 -d > "$RUNNER_TEMP/release.keystore"
+          SIZE=$(stat -c%s "$RUNNER_TEMP/release.keystore")
+          echo "Ключ подписи: $SIZE байт"
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "::error::Файл ключа слишком мал ($SIZE байт): секрет KEYSTORE_BASE64 скопирован не целиком"
+            exit 1
+          fi
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.keystore" -storepass:env KEYSTORE_PASSWORD > /dev/null 2>&1; then
+            echo "::error::Ключ не открывается паролем KEYSTORE_PASSWORD — проверьте KEYSTORE_PASSWORD в Secrets"
+            exit 1
+          fi
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
       - name: Юнит-тесты
         run: |
