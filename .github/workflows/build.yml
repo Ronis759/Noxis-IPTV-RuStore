@@ -1,0 +1,118 @@
+name: Build APK (RuStore)
+
+# Сборка APK для RuStore в GitHub Actions.
+# APK появляется во вкладке Actions → выбранный запуск → Artifacts.
+# При желании (workflow_dispatch + release) он же публикуется в Releases.
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main]
+    # правки только документации сборку не запускают
+    paths-ignore: ["**.md", "LICENSE", ".github/dependabot.yml"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Опубликовать релиз с APK"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Ключ нужен, чтобы APK можно было загрузить в RuStore: отладочная подпись магазином не принимается
+      HAS_KEY: ${{ secrets.KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/wrapper-validation@v4   # gradle-wrapper.jar должен совпадать с официальным
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Ключ подписи из Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Secret KEYSTORE_BASE64 не задан: APK будет подписан отладочным ключом, RuStore такой файл не примет"
+          fi
+
+      - name: Юнит-тесты
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Сборка
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Проверка APK перед загрузкой в RuStore
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAPT=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name aapt2 | sort -V | tail -1)
+
+          echo "--- пакет и версия ---"
+          "$AAPT" dump badging "$APK" | grep -E "^package:|^application-label:" | head -3
+
+          # Главное условие модерации: разрешения на установку APK быть не должно
+          "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" > "$RUNNER_TEMP/manifest.txt"
+          if grep -q "REQUEST_INSTALL_PACKAGES" "$RUNNER_TEMP/manifest.txt"; then
+            echo "::error::В APK есть REQUEST_INSTALL_PACKAGES — RuStore отклонит сборку"
+            exit 1
+          fi
+          echo "REQUEST_INSTALL_PACKAGES отсутствует — ок"
+
+      - name: Переименовать APK и посчитать SHA-256
+        id: apk
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          CODE=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)
+          NAME="noxis-iptv-rustore-$VER.apk"
+          cd app/build/outputs/apk/release
+          mv app-release.apk "$NAME"
+          sha256sum "$NAME" > "$NAME.sha256"
+          cat "$NAME.sha256"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: noxis-iptv-rustore-apk
+          path: |
+            app/build/outputs/apk/release/${{ steps.apk.outputs.name }}
+            app/build/outputs/apk/release/${{ steps.apk.outputs.name }}.sha256
+          if-no-files-found: error
+
+      - name: Публикация релиза
+        if: github.event_name == 'workflow_dispatch' && inputs.release && env.HAS_KEY == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          # тег с номером сборки: одинаковые версии в build.gradle.kts не перезаписывают друг друга
+          tag_name: rustore-${{ steps.apk.outputs.version }}-${{ github.run_number }}
+          name: RuStore ${{ steps.apk.outputs.version }} (${{ steps.apk.outputs.code }}) — сборка ${{ github.run_number }}
+          body: |
+            APK для RuStore: `${{ steps.apk.outputs.name }}`
+            Версия: ${{ steps.apk.outputs.version }}, номер сборки: ${{ steps.apk.outputs.code }}
+            Разрешение REQUEST_INSTALL_PACKAGES: отсутствует.
+            Контрольная сумма — в файле `.sha256`.
+          files: |
+            app/build/outputs/apk/release/${{ steps.apk.outputs.name }}
+            app/build/outputs/apk/release/${{ steps.apk.outputs.name }}.sha256
+          make_latest: true

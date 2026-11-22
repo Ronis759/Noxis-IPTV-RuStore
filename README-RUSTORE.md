@@ -39,7 +39,42 @@ $env:GRADLE_USER_HOME = "E:\OpenCode\Noxis-IPTV\.gradle"   # готовый кэ
 Без ключа APK подпишется отладочным ключом — это нормально для проверки,
 но в RuStore такой файл не примут.
 
-### Подпись постоянным ключом
+### Сборка в GitHub Actions
+
+Workflow: `.github/workflows/build.yml`. Запускается сам при push в `main`
+(кроме правок только документации) или вручную: вкладка **Actions** → **Build APK (RuStore)**
+→ **Run workflow**.
+
+Что делает: юнит-тесты → `assembleRelease` → проверка, что в APK **нет**
+`REQUEST_INSTALL_PACKAGES` → переименование в `noxis-iptv-rustore-<версия>.apk`
+и SHA-256 → выгрузка во Artifacts.
+
+**Готовый APK:** Actions → нужный запуск → блок **Artifacts** →
+`noxis-iptv-rustore-apk.zip` (внутри APK и файл `.sha256`).
+
+Подпись берётся из Secrets этого репозитория (Settings → Secrets and variables →
+Actions → New repository secret). Нужны те же четыре секрета, что и в основном проекте:
+
+| Секрет | Значение |
+|---|---|
+| `KEYSTORE_BASE64` | файл `release.keystore`, закодированный в base64 |
+| `KEYSTORE_PASSWORD` | пароль хранилища ключей |
+| `KEY_ALIAS` | имя ключа |
+| `KEY_PASSWORD` | пароль ключа |
+
+Base64 из файла ключа (PowerShell):
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("E:\OpenCode\Noxis-IPTV\keys-backup\Noxis-IPTV\release.keystore"))
+```
+
+Без `KEYSTORE_BASE64` сборка пройдёт, но APK будет с отладочной подписью (в логе
+будет предупреждение) — для RuStore он не годится.
+
+Если при ручном запуске включить галочку **«Опубликовать релиз с APK»** и секреты
+заданы, APK дополнительно появится в **Releases** (тег `rustore-<версия>-<номер запуска>`).
+
+### Подпись постоянным ключом (локально)
 
 Ключ и пароли лежат в основном проекте: `E:\OpenCode\Noxis-IPTV\keys-backup\Noxis-IPTV\`
 (`release.keystore` и `secrets.txt`). В этот проект они **не копируются**.
@@ -57,7 +92,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign-release.ps1
 ## Публикация в RuStore
 
 1. `versionCode` увеличивать перед каждой загрузкой (текущий — 28; сборку 27 отклонили).
-2. Загружать `releases/noxis-iptv-rustore-3.0.0.apk` (APK, не AAB).
+2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.0.0.apk`
+   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.0.0.apk`.
 3. В описании обновления указать: «Устранена причина отклонения: удалено разрешение
    REQUEST_INSTALL_PACKAGES, обновления устанавливаются через RuStore».
 
