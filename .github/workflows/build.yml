@@ -47,7 +47,12 @@ jobs:
             exit 0
           fi
           # выбрасываем всё, что не входит в base64: переносы строк, пробелы, кавычки, случайные символы
-          printf '%s' "$KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=' | base64 -d > "$RUNNER_TEMP/release.keystore"
+          RAW=$(printf '%s' "$KEYSTORE_BASE64" | tr -cd 'A-Za-z0-9+/=')
+          echo "Секрет KEYSTORE_BASE64: ${#RAW} символов base64"
+          if ! printf '%s' "$RAW" | base64 -d > "$RUNNER_TEMP/release.keystore" 2> "$RUNNER_TEMP/b64.err"; then
+            echo "::error::KEYSTORE_BASE64 не декодируется ($(cat "$RUNNER_TEMP/b64.err")), символов: ${#RAW}. Скорее всего значение скопировано не целиком."
+            exit 1
+          fi
           SIZE=$(stat -c%s "$RUNNER_TEMP/release.keystore")
           echo "Ключ подписи: $SIZE байт"
           if [ "$SIZE" -lt 1000 ]; then
