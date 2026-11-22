@@ -78,6 +78,14 @@ jobs:
           fi
           echo "REQUEST_INSTALL_PACKAGES отсутствует — ок"
 
+          # Каким ключом подписан APK: RuStore принимает только постоянный ключ, не отладочный
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner | sort -V | tail -1)
+          DN=$("$APKSIGNER" verify --print-certs "$APK" | grep "certificate DN" | head -1)
+          echo "$DN"
+          if echo "$DN" | grep -q "Android Debug"; then
+            echo "::warning::APK подписан отладочным ключом — для RuStore нужны секреты KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD"
+          fi
+
       - name: Переименовать APK и посчитать SHA-256
         id: apk
         run: |
