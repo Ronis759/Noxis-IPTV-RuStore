@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+.gradle-user/
+build/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+
+# Local Android SDK configuration
+local.properties
+
+# Android build and capture files
+captures/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Personal server lists and credentials
+servers.txt
+secrets.txt
+keys-backup/
+*.keystore
+*.jks
+*.p12
+
+# Settings backups containing URLs, logins or keys
+noxis-settings*.json
+
+# Локально собранные APK: в RuStore загружаются вручную из releases/
+releases/

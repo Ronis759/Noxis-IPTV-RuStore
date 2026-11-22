@@ -1,0 +1,453 @@
+package app.iptv.tv
+
+import android.util.Xml
+import org.xmlpull.v1.XmlPullParser
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
+import java.util.Calendar
+import java.util.TimeZone
+import java.util.zip.GZIPInputStream
+
+class Channel(
+    val idx: Int, val id: String, val name: String, val tname: String, val logo: String, val group: String,
+    val url: String, val days: Int, val ctype: String, val csrc: String
+) {
+    var eid: String = ""
+    /** Уникальный ключ для «своего порядка»: у дублей названия (один канал в разных группах) добавляется #2, #3… */
+    var okey: String = name
+}
+
+class Prog(val s: Long, val e: Long, val title: String, val description: String = "")
+class Playlist(val ch: List<Channel>, val epgUrl: String)
+class HttpCodeException(val code: Int) : IOException("HTTP $code")
+/** Ответ больше допустимого размера (защита от огромных плейлистов, логотипов и «gzip-бомб»). */
+class TooBigException(limit: Long) : IOException(L.f("Ответ слишком большой (лимит {0} МБ)", limit / 1048576))
+class Epg(val map: Map<String, List<Prog>>, val names: Map<String, String>, val ids: Map<String, String>)
+class Server(val name: String, val pl: String, val epg: String)
+
+object Iptv {
+    const val DEFAULT_UA = "Mozilla/5.0 (Linux; Android TV) IPTV"
+    /** Предельные размеры ответов, байт. Плейлист — после распаковки gzip. */
+    const val MAX_PLAYLIST = 64L * 1024 * 1024
+    const val MAX_LOGO = 4L * 1024 * 1024
+    const val MAX_JSON = 2L * 1024 * 1024
+    /**
+     * Предельная длина названия и описания передачи. Некоторые серверы кладут в <desc> целые страницы:
+     * без ограничения память на ТВ-боксе заканчивается, и телевизор может зависнуть.
+     * Для окна подробностей с прокруткой этого достаточно с большим запасом.
+     */
+    const val MAX_TITLE = 300
+    const val MAX_DESC = 1000
+    @Volatile var customUa: String = ""
+    /** User-Agent, с которым сервер реально ответил (если пришлось подбирать). Передаётся и в плеер. */
+    @Volatile var goodUa: String? = null
+    /** Вызывается из фонового потока, когда подобран новый рабочий User-Agent. */
+    @Volatile var onUa: ((String) -> Unit)? = null
+    private val UAS = listOf(
+        "Mozilla/5.0", "VLC/3.0.20 LibVLC/3.0.20", "okhttp/4.12.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    /** true — редирект переводит защищённое соединение (https) на открытое (http). */
+    fun isDowngrade(from: String, to: String): Boolean =
+        from.startsWith("https://", true) && to.startsWith("http://", true)
+
+    /** Открывает соединение с ручной обработкой редиректов; возвращает его только при коде 200. */
+    private fun connect(url: String, ua: String): HttpURLConnection {
+        var u = url
+        for (i in 0 until 6) {
+            val c = URL(u).openConnection() as HttpURLConnection
+            c.connectTimeout = 15000
+            c.readTimeout = 40000
+            c.instanceFollowRedirects = false
+            c.setRequestProperty("User-Agent", ua)
+            c.setRequestProperty("Accept", "*/*")
+            val code = try { c.responseCode } catch (e: IOException) { c.disconnect(); throw e }
+            if (code in 300..399) {
+                val l = c.getHeaderField("Location")
+                c.disconnect()
+                if (l == null) break
+                val next = URL(URL(u), l).toString()
+                // https -> http: логин и ключи из ссылки ушли бы в открытом виде
+                if (isDowngrade(u, next)) throw IOException(L.f("Редирект с https на http заблокирован: {0}", redactUrl(u)))
+                u = next
+                continue
+            }
+            if (code != 200) { c.disconnect(); throw HttpCodeException(code) }
+            return c
+        }
+        throw IOException(L.f("Не удалось загрузить: {0}", redactUrl(url)))
+    }
+
+    /** Перебирает User-Agent при 401/403/406/429/451 и отдаёт открытое соединение в [block]. */
+    private fun <T> withUa(url: String, remember: Boolean, rotate: Boolean = true, fixedUa: String? = null, block: (HttpURLConnection) -> T): T {
+        // fixedUa — служебные запросы (GitHub): свой User-Agent, без подбора и без влияния на общий goodUa
+        val list = if (fixedUa != null) listOf(fixedUa)
+        else if (customUa.isNotEmpty()) listOf(customUa)
+        else if (!rotate) listOf(goodUa ?: UAS[0])
+        else listOfNotNull(goodUa) + UAS.filter { it != goodUa }
+        var last: IOException? = null
+        for ((idx, ua) in list.withIndex()) {
+            var c: HttpURLConnection? = null
+            try {
+                c = connect(url, ua)
+                val r = block(c)
+                // Запоминаем UA только если пришлось подбирать (не первый в списке)
+                if (remember && fixedUa == null && customUa.isEmpty() && idx > 0) { goodUa = ua; onUa?.invoke(ua) }
+                return r
+            } catch (e: HttpCodeException) {
+                last = e
+                if (e.code !in intArrayOf(401, 403, 406, 429, 451)) throw e
+            } finally {
+                c?.disconnect()
+            }
+        }
+        throw last ?: IOException("HTTP 403")
+    }
+
+    /** [remember] = false для побочных запросов (логотипы): они не меняют общий User-Agent и не перебирают их при 403. */
+    fun http(url: String, remember: Boolean = true, max: Long = MAX_PLAYLIST, ua: String? = null): ByteArray =
+        withUa(url, remember && ua == null, remember && ua == null, ua) { c ->
+            if (c.contentLength >= 0 && c.contentLength.toLong() > max) throw TooBigException(max)
+            c.inputStream.use { readLimited(it, max) }
+        }
+
+    /** Читает поток целиком, но не больше [max] байт: иначе TooBigException. */
+    fun readLimited(i: InputStream, max: Long): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(65536)
+        var total = 0L
+        while (true) {
+            val n = i.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > max) throw TooBigException(max)
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
+    /** Копирует поток, но не больше [max] байт: иначе TooBigException. Возвращает число записанных байт. */
+    fun copyLimited(i: InputStream, o: java.io.OutputStream, max: Long): Long {
+        val buf = ByteArray(65536)
+        var total = 0L
+        while (true) {
+            val n = i.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > max) throw TooBigException(max)
+            o.write(buf, 0, n)
+        }
+        return total
+    }
+
+    /**
+     * Потоковая загрузка в файл (без хранения всего ответа в памяти). Старый файл заменяется только при успехе.
+     * Обрыв соединения посередине не должен выглядеть успехом: если сервер указал размер, а получено меньше — IOException.
+     * (Иначе обрезанный файл программы передач заменял рабочий.)
+     */
+    fun download(url: String, dest: File, ua: String? = null, max: Long = Long.MAX_VALUE) {
+        val tmp = File(dest.parentFile, dest.name + ".tmp")
+        try {
+            withUa(url, ua == null, ua == null, ua) { c ->
+                val len = c.contentLength.toLong()
+                if (len > max) throw TooBigException(max)
+                val got = c.inputStream.use { i -> tmp.outputStream().use { o -> copyLimited(i, o, max) } }
+                if (len > 0 && got < len) throw IOException(L.f("файл загружен не полностью ({0} из {1} байт)", got, len))
+            }
+            if (!tmp.renameTo(dest)) {
+                dest.delete()
+                if (!tmp.renameTo(dest)) throw IOException(L.t("Не удалось сохранить файл"))
+            }
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    private fun isGz(b: ByteArray) = b.size > 2 && b[0] == 0x1f.toByte() && b[1] == 0x8b.toByte()
+
+    fun text(b: ByteArray): String {
+        val raw = if (isGz(b)) GZIPInputStream(ByteArrayInputStream(b)).use { readLimited(it, MAX_PLAYLIST) } else b
+        return decode(raw).removePrefix("\uFEFF")
+    }
+
+    /** Строго UTF-8; если байты не образуют корректный UTF-8 — считаем, что это windows-1251 (старые русские плейлисты). */
+    fun decode(raw: ByteArray): String = try {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(raw)).toString()
+    } catch (e: CharacterCodingException) {
+        String(raw, Charset.forName("windows-1251"))
+    }
+
+    private val URL_IN_TEXT = Regex("""[A-Za-z][A-Za-z0-9+.\-]*://[^\s"'<>]+""")
+
+    /** «схема://хост»: путь, параметры и логин:пароль отбрасываются, чтобы секреты из ссылки не попадали на экран. */
+    fun redactUrl(u: String): String {
+        val i = u.indexOf("://")
+        if (i < 0) return "…"
+        var rest = u.substring(i + 3)
+        val end = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }
+        if (end >= 0) rest = rest.substring(0, end)
+        rest = rest.substringAfterLast('@')
+        return u.substring(0, i + 3) + rest
+    }
+
+    /** Текст ошибки для показа пользователю: все ссылки в нём заменены на «схема://хост». */
+    fun safeMsg(e: Throwable): String =
+        URL_IN_TEXT.replace(e.message ?: e.javaClass.simpleName) { redactUrl(it.value) }
+
+    private val AT = Regex("([\\w-]+)=\"([^\"]*)\"")
+    private fun attrs(s: String): Map<String, String> =
+        AT.findAll(s).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
+
+    fun parseM3u(t: String): Playlist {
+        val out = ArrayList<Channel>()
+        var head: Map<String, String> = emptyMap()
+        var a: Map<String, String>? = null
+        var name = ""
+        var grp: String? = null
+        for (raw in t.lineSequence()) {
+            val l = raw.trim()
+            if (l.isEmpty()) continue
+            when {
+                l.startsWith("#EXTM3U") -> head = attrs(l)
+                l.startsWith("#EXTINF") -> {
+                    a = attrs(l)
+                    // название — после первой запятой вне кавычек (запятая внутри названия или атрибутов не мешает)
+                    name = EXTINF_HEAD.find(l)?.let { l.substring(it.value.length).trim() } ?: ""
+                    grp = null
+                }
+                l.startsWith("#EXTGRP:") -> grp = l.substring(8).trim()
+                l.startsWith("#") -> {}
+                else -> {
+                    val x = a
+                    if (x != null) {
+                        val days = (x["catchup-days"] ?: x["tvg-rec"] ?: head["catchup-days"])?.toIntOrNull() ?: 0
+                        out.add(
+                            Channel(
+                                out.size, x["tvg-id"] ?: "", name.ifEmpty { x["tvg-name"] ?: "Канал" }, x["tvg-name"] ?: "",
+                                x["tvg-logo"] ?: "", x["group-title"] ?: grp ?: "Без группы", l, days,
+                                x["catchup"] ?: x["catchup-type"] ?: head["catchup"] ?: head["catchup-type"] ?: "",
+                                x["catchup-source"] ?: head["catchup-source"] ?: ""
+                            )
+                        )
+                        a = null
+                    }
+                }
+            }
+        }
+        val seen = HashMap<String, Int>()
+        for (c in out) {
+            val n = (seen[c.name] ?: 0) + 1
+            seen[c.name] = n
+            if (n > 1) c.okey = c.name + "#" + n
+        }
+        return Playlist(out, (head["url-tvg"] ?: head["x-tvg-url"] ?: "").split(",")[0].trim())
+    }
+
+    private val EXTINF_HEAD = Regex("""^#EXTINF:(?:[^,"]|"[^"]*")*,""")
+    private val FILL = Regex("""\$?\{(\w+)\}""")
+
+    fun arcUrl(c: Channel, s: Long, e: Long, def: String): String {
+        val n = System.currentTimeMillis() / 1000
+        val d = e - s
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        cal.timeInMillis = s * 1000
+        fun f(x: Int) = x.toString().padStart(2, '0')
+        val v = mapOf(
+            "start" to "$s", "utc" to "$s", "end" to "$e", "lutc" to "$n", "timestamp" to "$n",
+            "offset" to "${n - s}", "duration" to "$d",
+            "Y" to "${cal.get(Calendar.YEAR)}", "m" to f(cal.get(Calendar.MONTH) + 1),
+            "d" to f(cal.get(Calendar.DAY_OF_MONTH)), "H" to f(cal.get(Calendar.HOUR_OF_DAY)),
+            "M" to f(cal.get(Calendar.MINUTE)), "S" to f(cal.get(Calendar.SECOND))
+        )
+        fun fill(t: String) = FILL.replace(t) { v[it.groupValues[1]] ?: it.value }
+        val type = (c.ctype.ifEmpty { if (c.csrc.isNotEmpty()) "default" else def }).lowercase()
+        val url = c.url
+        if (type == "append") return url + fill(c.csrc.ifEmpty { "?utc={start}&lutc={timestamp}" })
+        // "default" без catchup-source раньше возвращал ссылку прямого эфира; теперь такой случай идёт по общему запасному пути ниже
+        if (c.csrc.isNotEmpty() && type != "shift" && !type.startsWith("flus") && type != "fs") {
+            val t = fill(c.csrc)
+            return if (t.startsWith("http")) t else url + t
+        }
+        if (type.startsWith("flus") || type == "fs") {
+            val p = url.substringBefore('?')
+            val q = if (url.contains('?')) "?" + url.substringAfter('?') else ""
+            val b = p.substringBeforeLast('/')
+            return if (p.contains("mpegts") || p.endsWith(".ts")) "$b/timeshift_abs-$s.ts$q"
+            else "$b/index-$s-$d.m3u8$q"
+        }
+        return url + (if (url.contains('?')) "&" else "?") + "utc=$s&lutc=$n"
+    }
+
+    /**
+     * Варианты ссылки на архив в порядке попыток: сначала по правилам плейлиста/типа архива,
+     * затем типичные форматы Flussonic. Число — устойчивый номер формата (запоминается для сервера).
+     */
+    fun arcCandidates(c: Channel, s: Long, e: Long, def: String): List<Pair<Int, String>> {
+        val n = System.currentTimeMillis() / 1000
+        val d = e - s
+        val url = c.url
+        val p = url.substringBefore('?')
+        val q = if (url.contains('?')) "?" + url.substringAfter('?') else ""
+        val b = p.substringBeforeLast('/')
+        val l = ArrayList<Pair<Int, String>>()
+        l.add(0 to arcUrl(c, s, e, def))
+        l.add(1 to url + (if (url.contains('?')) "&" else "?") + "utc=$s&lutc=$n")
+        l.add(2 to "$b/video-$s-$d.m3u8$q")
+        l.add(3 to "$b/index-$s-$d.m3u8$q")
+        if (p.contains("mpegts") || p.endsWith(".ts")) l.add(4 to "$b/timeshift_abs-$s.ts$q")
+        return l.distinctBy { it.second }
+    }
+
+    private val XR = Regex("""^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)?\s*([+-]\d{4})?""")
+
+    private fun xt(s: String?, tz: Int): Long {
+        val m = XR.find(s ?: "") ?: return 0L
+        val g = m.groupValues
+        val c = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        c.clear()
+        c.set(g[1].toInt(), g[2].toInt() - 1, g[3].toInt(), g[4].toInt(), g[5].toInt(), if (g[6].isEmpty()) 0 else g[6].toInt())
+        var z = tz * 60   // tz — часовой пояс программы в минутах от UTC
+        if (g[7].isNotEmpty()) {
+            val sign = if (g[7][0] == '-') -1 else 1
+            z = sign * (g[7].substring(1, 3).toInt() * 3600 + g[7].substring(3).toInt() * 60)
+        }
+        return c.timeInMillis / 1000 - z
+    }
+
+    fun norm(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), "")
+
+    fun matchEid(e: Epg, c: Channel): String {
+        if (c.id.isNotEmpty()) {
+            if (e.map.containsKey(c.id)) return c.id
+            val x = e.ids[c.id.lowercase()]
+            if (x != null) return x
+        }
+        for (n in listOf(c.tname, c.name)) {
+            if (n.isEmpty()) continue
+            val k = norm(n)
+            val a = e.names[k]
+            if (a != null) return a
+            val b = e.names[k.removeSuffix("hd")]
+            if (b != null) return b
+        }
+        return ""
+    }
+
+    fun hostOf(u: String): String = try { URL(u).host } catch (e: Exception) { u }
+
+    fun parseServers(t: String): List<Server> {
+        val out = ArrayList<Server>()
+        for (raw in t.split(Regex("\r\n|\r|\n"))) {
+            val l = raw.trim()
+            if (l.isEmpty() || l.startsWith("#") || l.startsWith("//")) continue
+            val tk = l.split("|").map { it.trim() }
+            val sv = when {
+                tk.size == 1 -> Server(hostOf(tk[0]), tk[0], "")
+                tk.size == 2 -> Server(tk[0], tk[1], "")
+                else -> Server(tk[0], tk[1], tk[2])
+            }
+            if (sv.pl.startsWith("http")) out.add(sv)
+        }
+        return out
+    }
+
+    /**
+     * Потоковый разбор XMLTV из файла (gzip определяется по сигнатуре).
+     * Если передан [chans], в памяти остаются только передачи каналов плейлиста
+     * и только в окне, которое реально нужно архиву — это резко снижает расход памяти.
+     * [parser] — разборщик XML (по умолчанию android.util.Xml; тесты передают kxml2, доступный в JVM).
+     */
+    fun parseEpg(f: File, tz: Int, chans: List<Channel>?, parser: () -> XmlPullParser = { Xml.newPullParser() }): Epg {
+        val raw = BufferedInputStream(FileInputStream(f), 65536)
+        raw.mark(2)
+        val b0 = raw.read()
+        val b1 = raw.read()
+        raw.reset()
+        val inp: InputStream = if (b0 == 0x1f && b1 == 0x8b) GZIPInputStream(raw, 65536) else raw
+        return inp.use { parseEpgStream(it, tz, chans, parser) }
+    }
+
+    /** Текст элемента до закрывающего тега; при ошибке атрибутов — без них. */
+    private fun textOf(p: XmlPullParser): String = try {
+        p.nextText().trim()
+    } catch (e: org.xmlpull.v1.XmlPullParserException) {
+        try { (p.text ?: "").trim() } catch (x: Exception) { "" }
+    }
+
+    private fun parseEpgStream(inp: InputStream, tz: Int, chans: List<Channel>?, parser: () -> XmlPullParser): Epg {
+        val p = parser()
+        p.setInput(inp, null)
+        val map = HashMap<String, MutableList<Prog>>()
+        val names = HashMap<String, String>()
+        val ids = HashMap<String, String>()
+        val titles = HashMap<String, String>()
+        val nowS = System.currentTimeMillis() / 1000
+        val keepDays = (chans?.maxOfOrNull { if (it.days > 0) it.days else 7 } ?: 14).coerceIn(1, 14)
+        val lo = nowS - keepDays * 86400L
+        val hi = nowS + 3 * 86400L   // запас вперёд: программа не кончается, даже если сеть пропала на пару дней
+        var wanted: Set<String>? = null
+        var chId = ""; var inCh = false; var pch = ""
+        var s = 0L; var e = 0L; var title = ""; var description = ""; var inProg = false
+        var ev = p.eventType
+        while (ev != XmlPullParser.END_DOCUMENT) {
+            if (ev == XmlPullParser.START_TAG) {
+                when (p.name) {
+                    "channel" -> { inCh = true; chId = p.getAttributeValue(null, "id") ?: ""; ids[chId.lowercase()] = chId }
+                    "display-name" -> if (inCh) {
+                        val k = norm(p.nextText())
+                        if (k.isNotEmpty()) {
+                            if (!names.containsKey(k)) names[k] = chId
+                            val k2 = k.removeSuffix("hd")
+                            if (k2.isNotEmpty() && !names.containsKey(k2)) names[k2] = chId
+                        }
+                    }
+                    "programme" -> {
+                        if (chans != null && wanted == null) {
+                            // Список каналов XMLTV уже прочитан — определяем, чьи передачи нужны
+                            val tmp = Epg(map, names, ids)
+                            wanted = chans.mapNotNullTo(HashSet<String>()) { c -> matchEid(tmp, c).takeIf { it.isNotEmpty() } }
+                        }
+                        inProg = true; title = ""; description = ""
+                        pch = p.getAttributeValue(null, "channel") ?: ""
+                        s = xt(p.getAttributeValue(null, "start"), tz)
+                        e = xt(p.getAttributeValue(null, "stop"), tz)
+                    }
+                    // неверный атрибут (например, lang="х") в заголовке не должен ронять разбор: текст читаем и без него
+                    "title" -> if (inProg && title.isEmpty()) title = textOf(p)
+                    "desc" -> if (inProg && description.isEmpty()) description = textOf(p)
+                }
+            } else if (ev == XmlPullParser.END_TAG) {
+                when (p.name) {
+                    "channel" -> inCh = false
+                    "programme" -> {
+                        val w = wanted
+                        if (inProg && e > s && e > lo && s < hi && (w == null || pch in w)) {
+                            val t = titles.getOrPut(title.take(MAX_TITLE)) { title.take(MAX_TITLE) }
+                            // описание ограничиваем сразу, чтобы оно не попало ни в память, ни в кэш целиком
+                            map.getOrPut(pch) { ArrayList() }.add(Prog(s, e, t, description.take(MAX_DESC)))
+                        }
+                        inProg = false
+                    }
+                }
+            }
+            ev = p.next()
+        }
+        map.values.forEach { l -> l.sortBy { it.s } }
+        return Epg(map, names, ids)
+    }
+}
