@@ -1,5 +1,7 @@
 # Подписывает собранный release-APK постоянным ключом Noxis IPTV.
 # Ключ и пароли берутся из keys-backup в основном проекте; в этот проект они не копируются.
+# Для сборки в GitHub Actions этот скрипт не нужен: там APK подписывается сразу при сборке
+# (ключ берётся из Secrets репозитория), см. .github/workflows/build.yml.
 $ErrorActionPreference = "Stop"
 
 $root = "E:\OpenCode\Noxis-IPTV RuStore"
