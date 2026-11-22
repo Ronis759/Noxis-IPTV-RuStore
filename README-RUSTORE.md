@@ -68,6 +68,10 @@ Base64 из файла ключа (PowerShell):
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("E:\OpenCode\Noxis-IPTV\keys-backup\Noxis-IPTV\release.keystore"))
 ```
 
+Ключ занимает **3488** символов base64 (2616 байт). Шаг «Ключ подписи из Secrets» печатает
+длину полученного секрета и проверяет, что ключ открывается паролем `KEYSTORE_PASSWORD`, —
+если длина меньше 3488, значит значение вставлено не целиком.
+
 Без `KEYSTORE_BASE64` сборка пройдёт, но APK будет с отладочной подписью (в логе
 будет предупреждение) — для RuStore он не годится.
 
