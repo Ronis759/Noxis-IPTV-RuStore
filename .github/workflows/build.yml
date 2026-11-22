@@ -22,6 +22,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # новый push отменяет ещё не закончившуюся сборку того же коммита
+    concurrency:
+      group: build-apk-${{ github.ref }}
+      cancel-in-progress: true
     env:
       # Ключ нужен, чтобы APK можно было загрузить в RuStore: отладочная подпись магазином не принимается
       HAS_KEY: ${{ secrets.KEYSTORE_BASE64 != '' }}
