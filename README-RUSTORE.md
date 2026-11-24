@@ -14,7 +14,7 @@
 | Разрешение `WRITE_EXTERNAL_STORAGE` | есть (Android 6–9) | **нет** |
 | Автообновление APK | есть | **нет** |
 | Кнопка в настройках | «Проверить обновления» | «Обновите через RuStore» |
-| Версия | 2.9.x (код = номер сборки GitHub) | 3.0.1 (код 29) |
+| Версия | 2.9.x (код = номер сборки GitHub) | 3.1.0 (код 30) |
 
 Почему убрано автообновление: модерация RuStore (п. 2.14) не пропускает разрешение
 `REQUEST_INSTALL_PACKAGES` — оно позволяет устанавливать APK в обход магазина.
@@ -104,17 +104,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign-release.ps1
 
 ## Публикация в RuStore
 
-1. `versionCode` увеличивать перед каждой загрузкой (текущий — 28; сборку 27 отклонили).
-2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.0.1.apk`
-   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.0.1.apk`.
-3. В описании обновления указать: «Устранена причина отклонения: удалено разрешение
-   REQUEST_INSTALL_PACKAGES, обновления устанавливаются через RuStore».
+1. `versionCode` увеличивать перед каждой загрузкой (текущий — 30; сборки 27 и 28 отклоняли).
+2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.1.0.apk`
+   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.1.0.apk`.
+3. В описании обновления перечислить изменения: мгновенный запуск из сохранённого
+   плейлиста и программы передач, кружок буферизации только при долгом ожидании.
 
 ## Проверка перед отправкой
 
 ```powershell
 $aapt = "$env:LOCALAPPDATA\Android\Sdk\build-tools\35.0.0\aapt2.exe"
-& $aapt dump xmltree --file AndroidManifest.xml releases\noxis-iptv-rustore-3.0.1.apk | Select-String "REQUEST_INSTALL|WRITE_EXTERNAL"
+& $aapt dump xmltree --file AndroidManifest.xml releases\noxis-iptv-rustore-3.1.0.apk | Select-String "REQUEST_INSTALL|WRITE_EXTERNAL"
 ```
 
 Вывод должен быть пустым.

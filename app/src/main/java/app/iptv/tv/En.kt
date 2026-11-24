@@ -58,6 +58,7 @@ object En {
         "Загрузка программы передач…" to "Loading TV guide…",
         "загрузка…" to "loading…",
         "Проверить обновления" to "Check for updates",
+        "Загрузка каналов…" to "Loading channels…",
         "Обновите через RuStore" to "Update via RuStore",
         "обновления устанавливаются через RuStore" to "updates are installed through RuStore",
         "Обновите приложение через RuStore" to "Update the app through RuStore",
