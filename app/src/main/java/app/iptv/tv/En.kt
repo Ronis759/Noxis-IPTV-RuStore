@@ -346,6 +346,7 @@ object En {
         "Нет предыдущего просмотренного канала" to "No previously watched channel",
         // настройки программы передач
         "Программа передач" to "TV guide",
+        "Программа передач (необязательно)" to "TV guide (optional)",
         "Ссылка XMLTV" to "XMLTV link",
         "Применить ссылку EPG" to "Apply the EPG link",
         "Часовой пояс телепрограммы" to "Guide time zone",
@@ -354,5 +355,27 @@ object En {
         // таймер сна
         "⏲ Таймер сна" to "⏲ Sleep timer",
         "⏲ Таймер сна: " to "⏲ Sleep timer: ",
+        // источники: файл, ссылки, список серверов
+        "Текущий источник" to "Current source",
+        "Выбрать из файла (M3U)" to "Choose an M3U file",
+        "Ссылка на плейлист" to "Playlist link",
+        "Выбрать из списка серверов" to "Choose from the server list",
+        "Локальный файл" to "Local file",
+        "Этот плейлист уже добавлен" to "This playlist is already added",
+        "Можно добавить не больше 10 источников" to "You can add no more than 10 sources",
+        "Ссылки на плейлисты (до 10)" to "Playlist links (up to 10)",
+        "＋ Добавить ещё" to "＋ Add another",
+        "Сохранить и загрузить" to "Save and load",
+        "Введите ссылку на плейлист" to "Enter a playlist link",
+        "Список серверов" to "Server list",
+        "Создайте файл server_IPTV.txt со строками «Название | ссылка | адрес программы» и откройте его здесь. Старый servers.txt тоже подходит." to "Create a server_IPTV.txt file with lines “Name | link | guide address” and open it here. The old servers.txt also works.",
+        "Открыть server_IPTV.txt" to "Open server_IPTV.txt",
+        "Сохранённые серверы" to "Saved servers",
+        "Список серверов пуст. Создайте server_IPTV.txt и откройте его" to "The server list is empty. Create server_IPTV.txt and open it",
+        "источников: {0} — {1}" to "sources: {0} — {1}",
+        " · не загружено источников: {0}" to " · sources not loaded: {0}",
+        "не удалось загрузить плейлисты" to "failed to load playlists",
+        "каналов: {0}" to "channels: {0}",
+        "пользовательская" to "custom",
     )
 }
