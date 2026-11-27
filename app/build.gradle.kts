@@ -19,8 +19,8 @@ android {
         targetSdk = 35
         // Для RuStore номер сборки фиксированный и растёт вручную перед каждой публикацией
         // (28 — отклонена из-за REQUEST_INSTALL_PACKAGES, 29 — без разрешений на установку и на запись)
-        versionCode = 35
-        versionName = "3.2.4"
+        versionCode = 36
+        versionName = "3.2.5"
         // Версия для RuStore: автообновление не используется, приложение APK не скачивает и не устанавливает
         buildConfigField("boolean", "UPDATES_ENABLED", "false")
     }
