@@ -19,8 +19,8 @@ android {
         targetSdk = 35
         // Для RuStore номер сборки фиксированный и растёт вручную перед каждой публикацией
         // (28 — отклонена из-за REQUEST_INSTALL_PACKAGES, 29 — без разрешений на установку и на запись)
-        versionCode = 36
-        versionName = "3.2.5"
+        versionCode = 37
+        versionName = "3.2.6"
         // Версия для RuStore: автообновление не используется, приложение APK не скачивает и не устанавливает
         buildConfigField("boolean", "UPDATES_ENABLED", "false")
     }
@@ -61,6 +61,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
     implementation("androidx.media3:media3-exoplayer-rtsp:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
+    // Программный декодер AC3/EAC3 (FFmpeg) для Media3 1.8.0: системный на части приставок не даёт звук
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
     testImplementation("junit:junit:4.13.2")
     // kxml2 — тот же разборщик XML, что android.util.Xml подставляет на устройстве: разбор XMLTV проверяется в обычном JVM-тесте
     testImplementation("net.sf.kxml:kxml2:2.3.0")

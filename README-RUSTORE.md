@@ -14,7 +14,7 @@
 | Разрешение `WRITE_EXTERNAL_STORAGE` | есть (Android 6–9) | **нет** |
 | Автообновление APK | есть | **нет** |
 | Кнопка в настройках | «Проверить обновления» | «Обновите через RuStore» |
-| Версия | 2.9.x (код = номер сборки GitHub) | 3.2.5 (код 36) |
+| Версия | 2.9.x (код = номер сборки GitHub) | 3.2.6 (код 37) |
 
 Почему убрано автообновление: модерация RuStore (п. 2.14) не пропускает разрешение
 `REQUEST_INSTALL_PACKAGES` — оно позволяет устанавливать APK в обход магазина.
@@ -105,8 +105,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign-release.ps1
 ## Публикация в RuStore
 
 1. `versionCode` увеличивать перед каждой загрузкой (текущий — 35; сборки 27 и 28 отклоняли).
-2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.2.5.apk`
-   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.2.5.apk`.
+2. Загружать APK (не AAB): либо собранный в Actions (`noxis-iptv-rustore-3.2.6.apk`
+   из Artifacts / Releases), либо локальный `releases/noxis-iptv-rustore-3.2.6.apk`.
 3. В описании обновления перечислить изменения: три способа добавить источник
    (файл M3U, до 10 ссылок, список серверов), каждый плейлист отдельным пунктом
    в списке групп, файл server_IPTV.txt, удаление сохранённых файлов серверов, исправление листания ↑/↓ в своей группе.
@@ -115,7 +115,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign-release.ps1
 
 ```powershell
 $aapt = "$env:LOCALAPPDATA\Android\Sdk\build-tools\35.0.0\aapt2.exe"
-& $aapt dump xmltree --file AndroidManifest.xml releases\noxis-iptv-rustore-3.2.5.apk | Select-String "REQUEST_INSTALL|WRITE_EXTERNAL"
+& $aapt dump xmltree --file AndroidManifest.xml releases\noxis-iptv-rustore-3.2.6.apk | Select-String "REQUEST_INSTALL|WRITE_EXTERNAL"
 ```
 
 Вывод должен быть пустым.
@@ -127,6 +127,13 @@ $aapt = "$env:LOCALAPPDATA\Android\Sdk\build-tools\35.0.0\aapt2.exe"
 - `app/build.gradle.kts` — `applicationId`, версия и `UPDATES_ENABLED = false`;
 - `app/src/main/res/drawable/icon.png`, `banner.png` — иконка и баннер с меткой RuStore;
 - `tools/sign-release.ps1` — подпись готового APK.
+
+## Сторонние компоненты
+Программный декодер AC3/EAC3 — `org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1`
+(репозиторий Jellyfin, лицензия GPL-3.0). Внутри — код Media3 под Apache 2.0 и FFmpeg
+под LGPL (без GPL-частей). Декодер включается только для AC3/EAC3; остальные кодеки
+остаются аппаратными. Нативный код собран под Android 6+ (API 23), поэтому на
+Android 5 (API 21) этот звук может не заработать.
 
 ## Репозиторий
 
